@@ -74,6 +74,61 @@ class OctopTests(unittest.TestCase):
 
         self.assertIsInstance(caught.exception.__cause__, http.client.IncompleteRead)
 
+    def test_client_reports_urlopen_timeout_as_runtime_error(self):
+        timeout = TimeoutError('timed out')
+        client = self.module.Client('http://127.0.0.1:4096', 'password')
+        with patch.object(self.module.urllib.request, 'urlopen', side_effect=timeout):
+            with self.assertRaisesRegex(
+                RuntimeError, r'Request timed out for /api/session/ses_test/context after 8s'
+            ) as caught:
+                client.get('/api/session/ses_test/context')
+
+        self.assertIs(caught.exception.__cause__, timeout)
+
+    def test_client_reports_urlerror_wrapped_timeout_as_runtime_error(self):
+        timeout = TimeoutError('timed out')
+        client = self.module.Client('http://127.0.0.1:4096', 'password')
+        with patch.object(
+            self.module.urllib.request,
+            'urlopen',
+            side_effect=self.module.urllib.error.URLError(timeout),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, r'Request timed out for /api/session/ses_test/context after 8s'
+            ) as caught:
+                client.get('/api/session/ses_test/context')
+
+        self.assertIs(caught.exception.__cause__, timeout)
+
+    def test_client_reports_response_read_timeout_as_runtime_error(self):
+        class TimedOutResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                raise TimeoutError('timed out')
+
+        client = self.module.Client('http://127.0.0.1:4096', 'password')
+        with patch.object(self.module.urllib.request, 'urlopen', return_value=TimedOutResponse()):
+            with self.assertRaisesRegex(
+                RuntimeError, r'Request timed out for /api/session/ses_test/context after 8s'
+            ) as caught:
+                client.get('/api/session/ses_test/context')
+
+        self.assertIsInstance(caught.exception.__cause__, TimeoutError)
+
+    def test_active_session_ids_falls_back_to_managed_when_private_times_out(self):
+        client = self.module.Client('http://127.0.0.1:4096', 'password')
+        self.module.opencode_api_get = lambda path: {'ses_managed': {'type': 'running'}}
+
+        with patch.object(
+            self.module.urllib.request, 'urlopen', side_effect=TimeoutError('timed out')
+        ):
+            self.assertEqual(self.module.active_session_ids(client), {'ses_managed'})
+
     def test_active_session_ids_uses_private_service_without_managed_subprocess(self):
         client = FakeClient({'/api/session/active': {'ses_private': {'type': 'running'}}})
         self.module.opencode_api_get = lambda path: self.fail(f'unexpected managed probe: {path}')

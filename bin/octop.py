@@ -20,6 +20,7 @@ import re
 import secrets
 import select
 import shutil
+import socket
 import subprocess
 import sys
 import termios
@@ -385,9 +386,17 @@ class Client:
                 raise RuntimeError('HTTP 401: incorrect password or missing access') from exc
             raise RuntimeError(f'HTTP {exc.code} for {path}') from exc
         except urllib.error.URLError as exc:
+            if isinstance(exc.reason, (socket.timeout, TimeoutError)):
+                # Chain the underlying timeout so __cause__ stays a TimeoutError,
+                # matching the raw-timeout contract below.
+                raise RuntimeError(f'Request timed out for {path} after {timeout}s') from exc.reason
             raise RuntimeError(f'Cannot connect to {self.base}: {exc.reason}') from exc
         except http.client.IncompleteRead as exc:
             raise RuntimeError(f'Incomplete HTTP response for {path}') from exc
+        # socket.timeout is an alias of TimeoutError on Python 3.10+; keep the
+        # explicit name so timeouts are still converted on older interpreters.
+        except (socket.timeout, TimeoutError) as exc:
+            raise RuntimeError(f'Request timed out for {path} after {timeout}s') from exc
         if 'json' not in content_type.lower():
             raise RuntimeError(f'{path} returned {content_type}, not JSON')
         try:
