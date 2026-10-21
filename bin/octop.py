@@ -1180,11 +1180,13 @@ def render_frame(
         else:
             lines.append('Keys: h header, s status, b bar, p pct, t tokens, m model, d date, c clock, f full title, a abbrev agent')
         if terminal_width is not None:
-            lines = [clip(line, max(0, terminal_width - 1)) for line in lines]
+            width = max(1, terminal_width - 1)
+            lines = [wrapped for line in lines for wrapped in wrap_title_lines(line, width)]
         lines.extend(['', 'PARENT'])
     else:
         lines = ['PARENT']
     lines.extend(parent_lines)
+    preserve_count = len(lines)
     lines.extend(['', 'SUBAGENTS'])
     if not subagent_lines:
         lines.append('No direct child sessions found for this parent.')
@@ -1200,7 +1202,6 @@ def render_frame(
             lines.append(f'… {omitted_count} older subagent(s) hidden to fit terminal')
     lines.append('')
     lines.append('Ctrl+C to stop. h for header.')
-    preserve_count = (6 if options.show_header else 1) + len(parent_lines)
     lines = fit_frame_lines(lines, max_lines, preserve_count=preserve_count)
     return '\n'.join(lines) + '\n'
 

@@ -1438,7 +1438,7 @@ class OctopTests(unittest.TestCase):
         self.assertIn('Keys: h header, s status, b bar, p pct, t tokens, m model, d date, c clock, f full title, a abbrev agent', lines)
         self.assertNotIn('(keys:', next(line for line in lines if line.startswith('Columns:')))
 
-    def test_render_frame_clips_header_before_subagents_on_narrow_terminal(self):
+    def test_render_frame_wraps_header_before_subagents_on_narrow_terminal(self):
         frame = self.module.render_frame(
             'ses_parent',
             ['parent line'],
@@ -1448,11 +1448,51 @@ class OctopTests(unittest.TestCase):
             terminal_width=64,
         )
         lines = frame.splitlines()
+        header = lines[:lines.index('PARENT')]
 
-        self.assertTrue(all(len(line) < 64 for line in lines[:5]))
-        self.assertTrue(lines[4].startswith('Keys:'))
+        self.assertTrue(all(len(line) < 64 for line in header))
+        self.assertEqual(header[0], 'octop — OpenCode top-style context monitor (active context)')
+        self.assertEqual(header[1], 'Parent: ses_parent')
+        self.assertEqual(header[2], 'Updated: 12:34:56')
+        self.assertEqual(' '.join(header[3:5]), f'Columns: {self.module.column_status(self.module.RowOptions(show_header=True))}')
+        self.assertEqual(' '.join(header[5:-1]),
+                         'Keys: h header, s status, b bar, p pct, t tokens, m model, d date, c clock, f full title, a abbrev agent')
         self.assertEqual(lines[lines.index('SUBAGENTS') + 1], 'child line')
         self.assertEqual(lines.count('child line'), 1)
+
+    def test_render_frame_wraps_long_parent_id_and_preserves_parent_on_short_screen(self):
+        parent = 'ses_' + 'a' * 70
+        frame = self.module.render_frame(
+            parent,
+            ['parent line'],
+            [['child line']],
+            now='12:34:56',
+            row_options=self.module.RowOptions(show_header=True),
+            terminal_width=32,
+            max_lines=12,
+        )
+        lines = frame.splitlines()
+
+        self.assertLessEqual(len(lines), 12)
+        self.assertTrue(all(len(line) < 32 for line in lines))
+        self.assertIn('PARENT', lines)
+        self.assertIn('parent line', lines)
+
+    def test_render_frame_wraps_long_parent_id_without_losing_content(self):
+        parent = 'ses_' + 'a' * 70
+        frame = self.module.render_frame(
+            parent,
+            ['parent line'],
+            [],
+            row_options=self.module.RowOptions(show_header=True),
+            terminal_width=32,
+        )
+        header = frame.splitlines()[:frame.splitlines().index('PARENT')]
+        parent_start = next(i for i, line in enumerate(header) if line.startswith('Parent:'))
+        updated_start = next(i for i, line in enumerate(header) if line.startswith('Updated:'))
+
+        self.assertTrue(all(len(line) < 32 for line in header))
+        self.assertEqual(''.join(header[parent_start:updated_start]).replace(' ', ''), f'Parent:{parent}')
 
     def test_render_frame_hides_header_by_default_and_starts_at_parent(self):
         frame = self.module.render_frame(
@@ -1545,12 +1585,12 @@ class OctopTests(unittest.TestCase):
             ['parent line'],
             [[f'child {i}'] for i in range(10)],
             now='12:34:56',
-            max_lines=8,
+            max_lines=9,
             row_options=self.module.RowOptions(show_header=True),
         )
         lines = frame.splitlines()
 
-        self.assertLessEqual(len(lines), 8)
+        self.assertLessEqual(len(lines), 9)
         self.assertEqual(lines[0], 'octop — OpenCode top-style context monitor (active context)')
         self.assertIn('Parent: ses_parent', lines)
         self.assertEqual(lines[-1], '… output shortened to fit terminal')
