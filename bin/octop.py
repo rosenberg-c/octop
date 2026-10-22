@@ -1399,16 +1399,14 @@ def session_output_lines(
     if label is None:
         name = f'{row_indicator_placeholder(state)} {name}'
     used, usage_info = current_step_usage(messages)
-    provider, model_id = None, None
-    if isinstance(usage_info, dict):
+    provider, model_id = session_model(session)
+    if (not provider or not model_id) and isinstance(usage_info, dict):
         provider = usage_info.get('providerID')
         model_id = usage_info.get('modelID')
         ref = usage_info.get('model')
         if isinstance(ref, dict):
             provider = ref.get('providerID') or provider
             model_id = ref.get('id') or model_id
-    if not provider or not model_id:
-        provider, model_id = session_model(session)
     limit, source = context_limit(catalog, provider, model_id, fallback)
     if used is None:
         used = session_token_fallback(session.get('tokens'), limit)

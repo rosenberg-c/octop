@@ -657,6 +657,53 @@ class OctopTests(unittest.TestCase):
 
         self.assertEqual(used, 24019)
 
+    def test_parent_model_uses_session_selection_not_subagent_usage_model(self):
+        local_message = [{
+            'info': {
+                'type': 'assistant',
+                'model': {'providerID': 'lms', 'id': 'qwen3.8-27b'},
+                'tokens': {'input': 1000, 'output': 20},
+            },
+        }]
+        client = FakeClient({
+            '/api/session/ses_parent/context': local_message,
+            '/api/session/ses_child/context': local_message,
+        })
+        catalog = {
+            ('openai', 'gpt-6-sol'): {'limit': {'context': 200000}},
+            ('lms', 'qwen3.8-27b'): {'limit': {'context': 82000}},
+        }
+        options = self.module.RowOptions(show_tokens=True, row_width=120)
+        parent = {'id': 'ses_parent', 'model': {'providerID': 'openai', 'id': 'gpt-6-sol'}}
+        child = {'id': 'ses_child', 'parentID': 'ses_parent',
+                 'model': {'providerID': 'lms', 'id': 'qwen3.8-27b'}}
+
+        parent_line = self.module.ANSI_RE.sub('', self.module.session_output_lines(
+            client, parent, catalog, 0, set(), label='Parent', row_options=options,
+        )[0])
+        child_line = self.module.ANSI_RE.sub('', self.module.session_output_lines(
+            client, child, catalog, 0, set(), row_options=options,
+        )[0])
+
+        self.assertIn('gpt-6-sol', parent_line)
+        self.assertNotIn('qwen3.8-27b', parent_line)
+        self.assertIn('qwen3.8-27b', child_line)
+
+    def test_session_model_falls_back_to_context_when_selection_missing(self):
+        client = FakeClient({'/api/session/ses_parent/context': [{
+            'info': {
+                'type': 'assistant',
+                'model': {'providerID': 'openai', 'id': 'gpt-6-sol'},
+                'tokens': {'input': 1000, 'output': 20},
+            },
+        }]})
+        line = self.module.ANSI_RE.sub('', self.module.session_output_lines(
+            client, {'id': 'ses_parent'}, {}, 0, set(),
+            row_options=self.module.RowOptions(row_width=120),
+        )[0])
+
+        self.assertIn('gpt-6-sol', line)
+
     def test_session_output_uses_context_usage_without_cache_read_overshoot(self):
         client = FakeClient({
             '/api/session/ses_parent/context': [{
