@@ -1424,6 +1424,103 @@ class OctopTests(unittest.TestCase):
         self.assertIn('poll avg', monitor.line())
         self.assertEqual(monitor.poll_count, 1)
 
+    def test_keyboard_disables_flow_control_for_ctrl_s_and_restores_tty(self):
+        class Input:
+            def isatty(self):
+                return True
+
+            def fileno(self):
+                return 7
+
+            def read(self, _size):
+                return '\x13'
+
+        stream = Input()
+        original = [self.module.termios.IXON, 0, 0, 0, 0, 0, []]
+        cbreak = original.copy()
+        with patch.object(self.module.termios, 'tcgetattr', side_effect=[original, cbreak]), \
+                patch.object(self.module.termios, 'tcsetattr') as set_attributes, \
+                patch.object(self.module.tty, 'setcbreak'), \
+                patch.object(self.module.select, 'select', return_value=([stream], [], [])):
+            with self.module.KeyboardShortcuts(stream) as keyboard:
+                self.assertEqual(keyboard.read_key(), '\x13')
+
+        self.assertEqual(cbreak[0], 0)
+        self.assertEqual(original[0], self.module.termios.IXON)
+        set_attributes.assert_any_call(7, self.module.termios.TCSANOW, cbreak)
+        set_attributes.assert_any_call(7, self.module.termios.TCSADRAIN, original)
+
+    def test_ctrl_s_returns_to_picker_and_monitors_selected_session(self):
+        events = []
+        snapshots = []
+        client = FakeClient()
+        with patch('sys.argv', ['octop', 'ses_first']):
+            args = self.module.arguments()
+
+        class TestKeyboard:
+            entries = 0
+
+            def __enter__(self):
+                self.index = TestKeyboard.entries
+                TestKeyboard.entries += 1
+                self.keys = iter(('h', '\x13') if self.index == 0 else (None,))
+                events.append(f'keyboard enter {self.index}')
+                return self
+
+            def __exit__(self, *_args):
+                events.append(f'keyboard exit {self.index}')
+
+            def read_key(self):
+                try:
+                    return next(self.keys)
+                except StopIteration:
+                    raise KeyboardInterrupt
+
+        class TestRenderer:
+            def render(self, frame):
+                events.append(f'render {frame}')
+
+            def close(self):
+                events.append('renderer close')
+
+        class TestPoller:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def request(self, *_args, **_kwargs):
+                return False
+
+            def current_snapshot(self):
+                return None
+
+            def consume_error(self):
+                return None
+
+        def collect(_client, session, _limit, **kwargs):
+            snapshots.append((session, kwargs['row_options'].show_header))
+            return self.module.DisplaySnapshot(session, 'waiting')
+
+        def choose(_client):
+            self.assertEqual(events[-2:], ['keyboard exit 0', 'renderer close'])
+            events.append('picker')
+            return 'ses_second'
+
+        with patch.object(self.module, 'arguments') as arguments, \
+                patch.object(self.module, 'Client', return_value=client), \
+                patch.object(self.module, 'TerminalRenderer', TestRenderer), \
+                patch.object(self.module, 'KeyboardShortcuts', TestKeyboard), \
+                patch.object(self.module, 'SnapshotPoller', TestPoller), \
+                patch.object(self.module, 'collect_display_snapshot', side_effect=collect), \
+                patch.object(self.module, 'choose_session', side_effect=choose), \
+                patch.object(self.module.time, 'sleep'), \
+                patch.dict(os.environ, {'OPENCODE_SERVER_PASSWORD': 'test'}):
+            arguments.return_value = args
+            self.assertEqual(self.module.main(), 0)
+
+        self.assertEqual(snapshots, [('ses_first', False), ('ses_second', True)])
+        self.assertIn('picker', events)
+        self.assertIn('render ses_second', events)
+
     def test_render_frame_puts_shortcut_keys_on_separate_line(self):
         frame = self.module.render_frame(
             'ses_parent',
@@ -1506,7 +1603,7 @@ class OctopTests(unittest.TestCase):
         self.assertEqual(lines[0], 'PARENT')
         self.assertIn('parent line', lines)
         self.assertIn('child line', lines)
-        self.assertIn('Ctrl+C to stop. h for header.', lines)
+        self.assertIn('Ctrl+C to stop. Ctrl-S for session. h for header.', lines)
         self.assertNotIn('octop — OpenCode top-style context monitor (active context)', lines)
         self.assertNotIn('Parent: ses_parent', lines)
         self.assertNotIn('Updated: 12:34:56', lines)
@@ -1530,7 +1627,7 @@ class OctopTests(unittest.TestCase):
         ]
 
         for frame in frames:
-            self.assertIn('Ctrl+C to stop. h for header.', frame)
+            self.assertIn('Ctrl+C to stop. Ctrl-S for session. h for header.', frame)
             for footer_line in verbose_footer:
                 self.assertNotIn(footer_line, frame)
 

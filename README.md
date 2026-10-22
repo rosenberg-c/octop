@@ -19,7 +19,7 @@ To skip the picker, pass a session ID: `octop ses_...` (or `octop ID=ses_...`). 
 
 ## Monitor keys
 
-Press `h` to show or hide the header with column settings and shortcuts. The header is hidden by default. Press `s` for status, `b` for progress bars, `p` for percentage, `t` for token counts, `m` for model, `d` for date, `c` for time, `f` for full titles, or `a` for abbreviated agent labels. These settings last only for the current run. Press `Ctrl+C` to stop.
+Press `h` to show or hide the header with column settings and shortcuts. The header is hidden by default. Press `s` for status, `b` for progress bars, `p` for percentage, `t` for token counts, `m` for model, `d` for date, `c` for time, `f` for full titles, or `a` for abbreviated agent labels. These settings last only for the current run. Press `Ctrl-S` to return to the session picker, or `Ctrl+C` to stop.
 
 Use `octop --help` for startup flags, including refresh intervals and column defaults. Context figures are estimates, not exact token counts.
 

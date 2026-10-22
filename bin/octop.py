@@ -1201,7 +1201,7 @@ def render_frame(
         if omitted_count:
             lines.append(f'… {omitted_count} older subagent(s) hidden to fit terminal')
     lines.append('')
-    lines.append('Ctrl+C to stop. h for header.')
+    lines.append('Ctrl+C to stop. Ctrl-S for session. h for header.')
     lines = fit_frame_lines(lines, max_lines, preserve_count=preserve_count)
     return '\n'.join(lines) + '\n'
 
@@ -1256,6 +1256,9 @@ class KeyboardShortcuts:
         self.fd = self.input.fileno()
         self.original = termios.tcgetattr(self.fd)
         tty.setcbreak(self.fd)
+        mode = termios.tcgetattr(self.fd)
+        mode[0] &= ~termios.IXON
+        termios.tcsetattr(self.fd, termios.TCSANOW, mode)
         return self
 
     def read_key(self):
@@ -1651,47 +1654,52 @@ def main():
             client.get('/api/session')
         if args.session is None:
             args.session = choose_session(client)
-        renderer = TerminalRenderer()
         row_options = row_options_from_args(args)
         performance = PerformanceMonitor() if args.profile_render else None
-        snapshot = collect_display_snapshot(
-            client,
-            args.session,
-            args.limit,
-            row_options=row_options,
-            right_margin=args.right_margin,
-            name_boost=args.name_boost,
-            profile_render=args.profile_render,
-        )
-        poller = SnapshotPoller(args.interval, performance=performance)
-        with KeyboardShortcuts() as keyboard:
-            while True:
-                key = keyboard.read_key()
-                if key:
-                    row_options = toggle_row_option(row_options, key)
-                poller.request(
-                    collect_display_snapshot,
-                    client,
-                    args.session,
-                    args.limit,
-                    row_options=row_options,
-                    right_margin=args.right_margin,
-                    name_boost=args.name_boost,
-                    profile_render=args.profile_render,
-                    force=bool(key),
-                )
-                snapshot = poller.current_snapshot() or snapshot
-                error = poller.consume_error()
-                if error:
-                    print(f'\nMonitor error: {error}', file=sys.stderr)
-                try:
-                    started = time.monotonic()
-                    renderer.render(render_snapshot(snapshot, performance.line() if performance else None))
-                    if performance is not None:
-                        performance.record_render(time.monotonic() - started)
-                except RuntimeError as exc:
-                    print(f'\nMonitor error: {exc}', file=sys.stderr)
-                time.sleep(args.animation_interval)
+        while True:
+            renderer = TerminalRenderer()
+            snapshot = collect_display_snapshot(
+                client,
+                args.session,
+                args.limit,
+                row_options=row_options,
+                right_margin=args.right_margin,
+                name_boost=args.name_boost,
+                profile_render=args.profile_render,
+            )
+            poller = SnapshotPoller(args.interval, performance=performance)
+            with KeyboardShortcuts() as keyboard:
+                while True:
+                    key = keyboard.read_key()
+                    if key == '\x13':
+                        break
+                    if key:
+                        row_options = toggle_row_option(row_options, key)
+                    poller.request(
+                        collect_display_snapshot,
+                        client,
+                        args.session,
+                        args.limit,
+                        row_options=row_options,
+                        right_margin=args.right_margin,
+                        name_boost=args.name_boost,
+                        profile_render=args.profile_render,
+                        force=bool(key),
+                    )
+                    snapshot = poller.current_snapshot() or snapshot
+                    error = poller.consume_error()
+                    if error:
+                        print(f'\nMonitor error: {error}', file=sys.stderr)
+                    try:
+                        started = time.monotonic()
+                        renderer.render(render_snapshot(snapshot, performance.line() if performance else None))
+                        if performance is not None:
+                            performance.record_render(time.monotonic() - started)
+                    except RuntimeError as exc:
+                        print(f'\nMonitor error: {exc}', file=sys.stderr)
+                    time.sleep(args.animation_interval)
+            renderer.close()
+            args.session = choose_session(client)
     except KeyboardInterrupt:
         print('\nMonitor stopped.')
     except RuntimeError as exc:
