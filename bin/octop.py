@@ -105,6 +105,7 @@ class RowOptions:
     show_percent: bool = False
     show_tokens: bool = False
     show_model: bool = True
+    full_model: bool = False
     show_date: bool = False
     show_time: bool = False
     full_title: bool = False
@@ -282,6 +283,8 @@ def row_options_from_args(args):
 
 
 def toggle_row_option(options, key):
+    if key == 'M':
+        return replace(options, full_model=not options.full_model)
     field = TOGGLE_ROW_OPTION_FIELDS.get(key.lower())
     if field:
         return replace(options, **{field: not getattr(options, field)})
@@ -939,13 +942,14 @@ def format_session_lines(
     clock='',
 ):
     model = short_model_name(provider, model_id)
+    full_model = f'{provider or "?"}/{model_id or "?"}'
     options = row_options or RowOptions()
     state = clip(compact_state(state), 11)
     if used is None:
-        return format_session_output(name, state, '', '', 'usage pending' if options.show_tokens else '', model, options, highlight_idle, highlight_stopped, date, clock)
+        return format_session_output(name, state, '', '', 'usage pending' if options.show_tokens else '', model, options, highlight_idle, highlight_stopped, date, clock, full_model=full_model)
     if not limit:
         usage = f'~{used:,} tok'
-        return format_session_output(name, state, '', '', usage if options.show_tokens else '', model, options, highlight_idle, highlight_stopped, date, clock)
+        return format_session_output(name, state, '', '', usage if options.show_tokens else '', model, options, highlight_idle, highlight_stopped, date, clock, full_model=full_model)
 
     used = display_used_tokens(used, limit)
     pct = 100 * used / limit
@@ -964,6 +968,7 @@ def format_session_lines(
         highlight_stopped,
         date,
         clock,
+        full_model=full_model,
     )
 
 
@@ -979,6 +984,7 @@ def format_session_output(
     highlight_stopped=False,
     date='',
     clock='',
+    full_model='',
 ):
     name_lines = str(name).splitlines() or ['']
     if options.full_title:
@@ -991,6 +997,8 @@ def format_session_output(
     else:
         lines = name_lines[:-1]
         lines.append(format_columns(name_lines[-1], state, bar, pct, usage, model, options, date, clock))
+    if options.full_model:
+        lines.extend(wrap_title_lines(f'  Model: {full_model}', options.row_width))
     return [
         style_session_line(line, state, highlight_idle=highlight_idle, highlight_stopped=highlight_stopped)
         for line in lines
@@ -1147,7 +1155,7 @@ def column_status(options):
         'on' if options.show_bar else 'off',
         'on' if options.show_percent else 'off',
         'on' if options.show_tokens else 'off',
-        'on' if options.show_model else 'off',
+        'full' if options.full_model else ('on' if options.show_model else 'off'),
         'on' if options.show_date else 'off',
         'on' if options.show_time else 'off',
         'full' if options.full_title else 'short',
@@ -1178,7 +1186,7 @@ def render_frame(
         if performance_line:
             lines.append(performance_line)
         else:
-            lines.append('Keys: h header, s status, b bar, p pct, t tokens, m model, d date, c clock, f full title, a abbrev agent')
+            lines.append('Keys: h header, s status, b bar, p pct, t tokens, m model, M full model, d date, c clock, f full title, a abbrev agent')
         if terminal_width is not None:
             width = max(1, terminal_width - 1)
             lines = [wrapped for line in lines for wrapped in wrap_title_lines(line, width)]
@@ -1519,6 +1527,8 @@ def collect_display_snapshot(
     terminal_height = terminal_size.lines
     options = row_options_with_width(options, terminal_size.columns, right_margin=right_margin, name_boost=name_boost)
     max_subagents = max_visible_subagents(terminal_height)
+    if options.full_model:
+        max_subagents //= 2
     visible_sessions, omitted_count = select_visible_subagents(sessions, active, max_subagents)
     options = replace(options, agent_label_width=visible_agent_label_width(visible_sessions, options.abbreviate_agent))
     child_states = []

@@ -595,6 +595,11 @@ class OctopTests(unittest.TestCase):
         self.assertTrue(options.show_tokens)
         options = self.module.toggle_row_option(options, 'm')
         self.assertFalse(options.show_model)
+        options = self.module.toggle_row_option(options, 'M')
+        self.assertTrue(options.full_model)
+        self.assertFalse(options.show_model)
+        options = self.module.toggle_row_option(options, 'M')
+        self.assertFalse(options.full_model)
         options = self.module.toggle_row_option(options, 'd')
         self.assertTrue(options.show_date)
         self.assertFalse(options.show_time)
@@ -688,6 +693,36 @@ class OctopTests(unittest.TestCase):
         self.assertIn('gpt-6-sol', parent_line)
         self.assertNotIn('qwen3.8-27b', parent_line)
         self.assertIn('qwen3.8-27b', child_line)
+
+    def test_full_model_shortcut_distinguishes_parent_and_child_defaults(self):
+        client = FakeClient({
+            '/api/session/ses_parent/context': [],
+            '/api/session/ses_child/context': [],
+        })
+        options = self.module.RowOptions(full_model=True, show_model=False, row_width=40)
+        parent = {'id': 'ses_parent', 'model': {'providerID': 'openai', 'id': 'default'}}
+        child = {'id': 'ses_child', 'parentID': 'ses_parent',
+                 'model': {'providerID': 'lms', 'id': 'default'}}
+
+        parent_lines = self.module.session_output_lines(
+            client, parent, {}, 0, set(), row_options=options,
+        )
+        child_lines = self.module.session_output_lines(
+            client, child, {}, 0, set(), row_options=options,
+        )
+
+        self.assertEqual(parent_lines[-1], '  Model: openai/default')
+        self.assertEqual(child_lines[-1], '  Model: lms/default')
+        self.assertTrue(all(len(line) <= 40 for line in parent_lines + child_lines))
+
+    def test_full_model_reference_wraps_in_narrow_rows(self):
+        lines = self.module.format_session_lines(
+            'Parent', 'idle', None, None, '', 'long-provider', 'long-model-name',
+            row_options=self.module.RowOptions(full_model=True, row_width=20),
+        )
+
+        self.assertEqual(''.join(lines[1:]).strip(), 'Model:long-provider/long-model-name')
+        self.assertTrue(all(len(line) <= 20 for line in lines))
 
     def test_session_model_falls_back_to_context_when_selection_missing(self):
         client = FakeClient({'/api/session/ses_parent/context': [{
@@ -1579,7 +1614,7 @@ class OctopTests(unittest.TestCase):
         lines = frame.splitlines()
 
         self.assertIn('Columns: status:off bar:on pct:off tokens:off model:on date:off time:off title:short agent:abbr', lines)
-        self.assertIn('Keys: h header, s status, b bar, p pct, t tokens, m model, d date, c clock, f full title, a abbrev agent', lines)
+        self.assertIn('Keys: h header, s status, b bar, p pct, t tokens, m model, M full model, d date, c clock, f full title, a abbrev agent', lines)
         self.assertNotIn('(keys:', next(line for line in lines if line.startswith('Columns:')))
 
     def test_render_frame_wraps_header_before_subagents_on_narrow_terminal(self):
@@ -1600,7 +1635,7 @@ class OctopTests(unittest.TestCase):
         self.assertEqual(header[2], 'Updated: 12:34:56')
         self.assertEqual(' '.join(header[3:5]), f'Columns: {self.module.column_status(self.module.RowOptions(show_header=True))}')
         self.assertEqual(' '.join(header[5:-1]),
-                         'Keys: h header, s status, b bar, p pct, t tokens, m model, d date, c clock, f full title, a abbrev agent')
+                         'Keys: h header, s status, b bar, p pct, t tokens, m model, M full model, d date, c clock, f full title, a abbrev agent')
         self.assertEqual(lines[lines.index('SUBAGENTS') + 1], 'child line')
         self.assertEqual(lines.count('child line'), 1)
 
