@@ -658,9 +658,31 @@ class OctopTests(unittest.TestCase):
             },
         }]
 
-        used, _ = self.module.current_step_usage(messages)
+        used, _ = self.module.current_step_usage(messages, 82000)
 
         self.assertEqual(used, 24019)
+
+    def test_current_step_usage_counts_bounded_cache_read(self):
+        messages = [{'info': {
+            'type': 'assistant',
+            'tokens': {'input': 1226, 'output': 130, 'reasoning': 18,
+                       'cache': {'read': 68736, 'write': 0}},
+        }}]
+
+        used, _ = self.module.current_step_usage(messages, 200000)
+
+        self.assertEqual(used, 70092)
+
+    def test_current_step_usage_excludes_cache_read_when_total_exceeds_limit(self):
+        messages = [{'info': {
+            'type': 'assistant',
+            'tokens': {'input': 1000, 'output': 20,
+                       'cache': {'read': 81000, 'write': 0}},
+        }}]
+
+        used, _ = self.module.current_step_usage(messages, 82000)
+
+        self.assertEqual(used, 1020)
 
     def test_parent_model_uses_session_selection_not_subagent_usage_model(self):
         local_message = [{
@@ -767,6 +789,29 @@ class OctopTests(unittest.TestCase):
         self.assertIn(' 29.3%', line)
         self.assertIn('24,019/82,000', line)
         self.assertNotIn('6,246,973', line)
+
+    def test_session_output_counts_cached_prompt_from_latest_step(self):
+        client = FakeClient({'/api/session/ses_parent/context': [
+            {'info': {'type': 'assistant', 'tokens': {
+                'input': 1226, 'output': 130, 'reasoning': 18,
+                'cache': {'read': 68736, 'write': 0},
+            }}},
+            {'info': {'type': 'assistant', 'tokens': None}},
+        ]})
+        catalog = {('openai', 'gpt-6-sol'): {'limit': {'context': 200000}}}
+
+        line = self.module.ANSI_RE.sub('', self.module.session_output_lines(
+            client,
+            {'id': 'ses_parent', 'model': {'providerID': 'openai', 'id': 'gpt-6-sol'},
+             'tokens': {'input': 66704, 'output': 3938,
+                        'cache': {'read': 1483520, 'write': 0}}},
+            catalog, 0, set(),
+            row_options=self.module.RowOptions(show_percent=True, show_tokens=True,
+                                               show_model=False, row_width=120),
+        )[0])
+
+        self.assertIn(' 35.0%', line)
+        self.assertIn('70,092/200,000', line)
 
     def test_session_output_clamps_cumulative_session_tokens_over_limit(self):
         client = FakeClient({'/api/session/ses_parent/context': []})

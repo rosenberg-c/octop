@@ -1286,21 +1286,23 @@ def token_number(value):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
 
 
-def token_dict_total(tokens):
+def token_dict_total(tokens, limit=None):
     if not isinstance(tokens, dict):
         return 0
     cache = tokens.get('cache') or {}
     if not isinstance(cache, dict):
         cache = {}
-    # OpenCode/provider token payloads can report cache.read as reused prompt
-    # history, and after compaction it may be cumulative across prior steps.
-    # For active-context occupancy, count fresh prompt/output plus cache writes,
-    # but do not add cache reads to the displayed context usage.
-    return (
+    total = (
         token_number(tokens.get('input'))
         + token_number(tokens.get('output'))
         + token_number(cache.get('write'))
     )
+    read = token_number(cache.get('read'))
+    # Cache reads occupy context, but some providers report cumulative reads
+    # after compaction. Only include them when the total fits the model window.
+    if limit and read > 0 and total + read <= limit:
+        total += read
+    return total
 
 
 def session_token_fallback(tokens, limit):
@@ -1338,13 +1340,12 @@ def display_used_tokens(used, limit):
     return used
 
 
-def current_step_usage(messages):
+def current_step_usage(messages, limit=None):
     """Read the latest assistant record from OpenCode 2 active context.
 
-    A completed model response reports input tokens for that step. Cache reads
-    can be reused/cumulative history after compaction, so they are not counted
-    as active occupancy. Output and reasoning may be included in the
-    approximation of occupancy at the end of the step. Never sum steps.
+    A completed model response reports prompt tokens for that step. Count
+    bounded cache reads as context, but not cumulative reads after compaction.
+    Output may include reasoning; never sum steps.
     """
     for msg in reversed(messages):
         if not isinstance(msg, dict):
@@ -1355,9 +1356,8 @@ def current_step_usage(messages):
         tok = info.get('tokens')
         if not isinstance(tok, dict):
             continue
-        # Input prompt + cache writes, plus generated output. Reasoning may
-        # already be included in output on some providers: avoid double count.
-        used = token_dict_total(tok)
+        # Reasoning may already be included in output: avoid double count.
+        used = token_dict_total(tok, limit)
         if used > 0:
             return int(used), info
     return None, None
@@ -1416,6 +1416,8 @@ def session_output_lines(
             provider = ref.get('providerID') or provider
             model_id = ref.get('id') or model_id
     limit, source = context_limit(catalog, provider, model_id, fallback)
+    if usage_info is not None:
+        used = token_dict_total(usage_info['tokens'], limit)
     if used is None:
         used = session_token_fallback(session.get('tokens'), limit)
     return format_session_lines(
