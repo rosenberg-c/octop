@@ -450,34 +450,6 @@ def child_sessions(client, parent):
     return sessions
 
 
-def parent_summaries_with_children(client, exclude_parent, limit=3):
-    response = opencode_api_get('/api/session?limit=200')
-    if response is None:
-        try:
-            response = client.get('/api/session', {'limit': '200'})
-        except RuntimeError:
-            response = None
-    sessions = extract_list(response, ('data', 'items', 'sessions', 'results'))
-    by_id = {s.get('id'): s for s in sessions if isinstance(s, dict) and s.get('id')}
-    counts = {}
-    latest = {}
-    for session in sessions:
-        if not isinstance(session, dict):
-            continue
-        parent = session.get('parentID')
-        if not parent or parent == exclude_parent:
-            continue
-        counts[parent] = counts.get(parent, 0) + 1
-        latest[parent] = max(latest.get(parent, 0), session_updated_time(session))
-    parents = sorted(counts, key=lambda sid: latest.get(sid, 0), reverse=True)
-    summaries = []
-    for parent in parents[:limit]:
-        session = by_id.get(parent, {})
-        title = session.get('title') or parent
-        summaries.append({'id': parent, 'title': title, 'count': counts[parent]})
-    return summaries
-
-
 def extract_list(response, keys=('items', 'data', 'sessions', 'results')):
     if isinstance(response, list):
         return response
@@ -1169,7 +1141,6 @@ def render_frame(
     subagent_lines,
     now=None,
     omitted_count=0,
-    alternate_parents=None,
     max_lines=None,
     row_options=None,
     performance_line=None,
@@ -1197,12 +1168,7 @@ def render_frame(
     preserve_count = len(lines)
     lines.extend(['', 'SUBAGENTS'])
     if not subagent_lines:
-        lines.append('No direct child sessions found for this parent.')
-        if alternate_parents:
-            lines.append('Recent parent sessions with subagents:')
-            for summary in alternate_parents:
-                title = clip(summary.get('title') or summary.get('id'), 34)
-                lines.append(f'  {summary.get("id")}  {summary.get("count")} child(s)  {title}')
+        lines.append('No child sessions found for this parent.')
     else:
         for index, session_lines in enumerate(subagent_lines):
             lines.extend(session_lines)
@@ -1568,13 +1534,11 @@ def collect_display_snapshot(
         )
         for session in visible_sessions
     ]
-    alternates = parent_summaries_with_children(client, parent) if not sessions else None
     return DisplaySnapshot(render_frame(
         parent,
         parent_lines,
         subagent_lines,
         omitted_count=omitted_count,
-        alternate_parents=alternates,
         max_lines=terminal_height,
         row_options=options,
         performance_line=PERFORMANCE_PLACEHOLDER if profile_render else None,

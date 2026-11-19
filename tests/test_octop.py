@@ -1035,34 +1035,6 @@ class OctopTests(unittest.TestCase):
 
         self.assertEqual(self.module.child_sessions(client, parent), [child])
 
-    def test_parent_summaries_with_children_suggests_other_recent_parent(self):
-        sessions = {
-            'data': [
-                {'id': 'selected', 'title': 'Selected parent', 'time': {'updated': 10}},
-                {'id': 'other', 'title': 'Other parent', 'time': {'updated': 20}},
-                {'id': 'child-a', 'parentID': 'other', 'time': {'updated': 30}},
-                {'id': 'child-b', 'parentID': 'other', 'time': {'updated': 40}},
-            ]
-        }
-        client = FakeClient()
-        self.module.opencode_api_get = lambda path: sessions
-
-        summaries = self.module.parent_summaries_with_children(client, 'selected')
-
-        self.assertEqual(summaries, [{'id': 'other', 'title': 'Other parent', 'count': 2}])
-
-    def test_parent_summaries_excludes_selected_parent_children(self):
-        sessions = {
-            'data': [
-                {'id': 'selected', 'title': 'Selected parent'},
-                {'id': 'selected-child', 'parentID': 'selected', 'time': {'updated': 30}},
-            ]
-        }
-        client = FakeClient()
-        self.module.opencode_api_get = lambda path: sessions
-
-        self.assertEqual(self.module.parent_summaries_with_children(client, 'selected'), [])
-
     def test_format_session_lines_stays_within_80_columns(self):
         lines = self.module.format_session_lines(
             'Very long subagent title that would otherwise consume the whole row',
@@ -1779,19 +1751,16 @@ class OctopTests(unittest.TestCase):
 
         self.assertIn('3 older subagent(s) hidden', frame)
 
-    def test_render_frame_shows_alternate_parents_when_no_direct_children(self):
+    def test_render_frame_shows_empty_message_when_parent_has_no_children(self):
         frame = self.module.render_frame(
             'selected',
             ['parent line'],
             [],
             now='12:34:56',
-            alternate_parents=[{'id': 'other', 'title': 'Other parent', 'count': 2}],
         )
 
-        self.assertIn('No direct child sessions found for this parent.', frame)
-        self.assertIn('Recent parent sessions with subagents:', frame)
-        self.assertIn('other', frame)
-        self.assertIn('2 child(s)', frame)
+        self.assertIn('No child sessions found for this parent.', frame)
+        self.assertNotIn('Recent parent sessions with subagents:', frame)
 
     def test_render_frame_omits_hidden_message_when_all_subagents_visible(self):
         frame = self.module.render_frame(
